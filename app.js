@@ -255,7 +255,6 @@ async function verifyAdminAccess(event) {
     const admin = snapshot.val() || {};
     const configuredCode = String(admin.code || admin.value || "").padStart(6, "0");
     if (code !== configuredCode) throw new Error("Admin code is incorrect.");
-    if (admin.isEnabled !== true) throw new Error("Admin access is disabled in Firebase.");
     adminSession = true;
     $("adminLoginForm").classList.add("hidden");
     $("adminDashboard").classList.remove("hidden");
@@ -337,11 +336,16 @@ async function toggleAdminAccess() {
 
 async function verifyPasscode(code) {
   const adminSnapshot = await database.ref("adminCode").once("value");
-  const admin = adminSnapshot.val();
-  if (admin && String(admin.code || admin.value || admin).padStart(6, "0") === code) {
-    if (admin.isEnabled === true) return { type: "admin" };
-    throw new Error("Warning: Admin Access Passcode is currently Disabled by Administrator.");
+  const admin = adminSnapshot.val() || {};
+
+  if (admin.isEnabled !== true) {
+    throw new Error("Exam access is temporarily disabled by the administrator.");
   }
+
+  if (String(admin.code || admin.value || "").padStart(6, "0") === code) {
+    return { type: "admin" };
+  }
+
   const lockedUntil = getLockout();
   if (lockedUntil) throw new Error(`This device is locked for ${formatTime(Math.ceil((lockedUntil - Date.now()) / 1000))}. Admin access can bypass this lock.`);
   const passcodeRef = database.ref(`passcodes/${code}`);
