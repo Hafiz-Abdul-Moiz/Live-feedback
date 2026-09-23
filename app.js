@@ -17,6 +17,7 @@ const EXAM_TOTAL_MARKS = 100;
 const PASSING_SCORE = 50;
 const LOCKOUT_MS = 30 * 60 * 1000;
 const LOCK_KEY = "skilltester_lockout";
+const DEFAULT_ADMIN_PASSWORD = "03262116352#";
 let adminSession = false;
 
 function openAdminPanel() {
@@ -249,12 +250,13 @@ async function verifyAdminAccess(event) {
   const error = $("adminError");
   error.textContent = "";
   const code = $("adminCodeInput").value.trim();
-  if (!/^\d{6}$/.test(code)) { error.textContent = "Admin code must contain exactly 6 digits."; return; }
+  if (!code) { error.textContent = "Admin password is required."; return; }
   try {
     const snapshot = await database.ref("adminCode").once("value");
     const admin = snapshot.val() || {};
-    const configuredCode = String(admin.code || admin.value || "").padStart(6, "0");
-    if (code !== configuredCode) throw new Error("Admin code is incorrect.");
+    const configuredPassword = String(admin.password || DEFAULT_ADMIN_PASSWORD);
+    if (code !== configuredPassword) throw new Error("Admin password is incorrect.");
+    if (!admin.password) database.ref("adminCode/password").set(configuredPassword).catch(() => undefined);
     adminSession = true;
     $("adminLoginForm").classList.add("hidden");
     $("adminDashboard").classList.remove("hidden");
@@ -334,6 +336,37 @@ async function toggleAdminAccess() {
   }
 }
 
+function createOneTimeCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function generatePasscode() {
+  if (!adminSession) return;
+  const button = $("generatePasscode");
+  button.disabled = true;
+  button.textContent = "Generating...";
+  try {
+    let generatedCode = "";
+    for (let attempt = 0; attempt < 10 && !generatedCode; attempt += 1) {
+      const candidateCode = createOneTimeCode();
+      const result = await database.ref(`passcodes/${candidateCode}`).transaction((current) => current || {
+        label: "Generated One-Time",
+        isUsed: false,
+        createdAt: firebase.database.ServerValue.TIMESTAMP
+      });
+      if (result.committed && result.snapshot.val()?.isUsed === false) generatedCode = candidateCode;
+    }
+    if (!generatedCode) throw new Error("Unique passcode generate nahi ho saka.");
+    await refreshAdminDashboard();
+    toast(`New one-time passcode: ${generatedCode}`, "success");
+  } catch (error) {
+    toast(error.message || "Passcode generate nahi ho saka.", "danger");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Generate One-Time Passcode";
+  }
+}
+
 async function verifyPasscode(code) {
   const adminSnapshot = await database.ref("adminCode").once("value");
   const admin = adminSnapshot.val() || {};
@@ -343,7 +376,7 @@ async function verifyPasscode(code) {
   }
 
   if (String(admin.code || admin.value || "").padStart(6, "0") === code) {
-    return { type: "admin" };
+    return { type: "regular" };
   }
 
   const lockedUntil = getLockout();
@@ -607,6 +640,7 @@ $("adminButton").addEventListener("click", openAdminPanel);
 $("closeAdmin").addEventListener("click", closeAdminPanel);
 $("adminLoginForm").addEventListener("submit", verifyAdminAccess);
 $("refreshAdmin").addEventListener("click", refreshAdminDashboard);
+$("generatePasscode").addEventListener("click", generatePasscode);
 $("toggleAdmin").addEventListener("click", toggleAdminAccess);
 $("downloadButton").addEventListener("click", downloadScorecard);
 $("refreshResults").addEventListener("click", loadLiveResults);
